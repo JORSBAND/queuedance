@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Графік репетицій</title>
+    <!-- Tailwind CSS для стилів -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React та ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel для компіляції JSX в браузері -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        body { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans pb-10">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        // Імпорти Firebase безпосередньо через CDN (офіційний спосіб для браузера)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Конфігурація Firebase ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCm8nZvhps4yeYDzPNyKLI_PvadAOeYI20",
+            authDomain: "vhrchat.firebaseapp.com",
+            projectId: "vhrchat",
+            storageBucket: "vhrchat.firebasestorage.app",
+            messagingSenderId: "1039293838718",
+            appId: "1:1039293838718:web:b74fddda402267040bef2f",
+            measurementId: "G-R9XY6JRZMF"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Шлях до колекції в базі даних (простий шлях для твого хостингу)
+        const COLLECTION_NAME = 'rehearsals';
+
+        // --- Константи ---
+        const CLASSES = ["5А", "5Б", "5В", "6А", "6Б", "7А", "7Б"];
+        const HALLS = [
+            { id: 'choreography', name: 'Хореографічний' },
+            { id: 'assembly', name: 'Актовий' }
+        ];
+        const DANCE_TYPES = [
+            { id: 'waltz', name: 'Вальс' },
+            { id: 'general', name: 'Загальний танець' }
+        ];
+        const DAYS = [
+            { id: 1, name: 'Понеділок', short: 'ПН' },
+            { id: 2, name: 'Вівторок', short: 'ВТ' },
+            { id: 3, name: 'Середа', short: 'СР' },
+            { id: 4, name: 'Четвер', short: 'ЧТ' },
+            { id: 5, name: 'П\'ятниця', short: 'ПТ' }
+        ];
+
+        // --- Іконки SVG ---
+        const IconUser = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+        const IconMapPin = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+        const IconTrash = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
+        const IconPlus = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
+        const IconInfo = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+
+        // Функція для визначення поточного тижня (для автоматичного очищення)
+        const getCurrentWeekKey = () => {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+            const week1 = new Date(d.getFullYear(), 0, 4);
+            const weekNumber = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            return `${d.getFullYear()}-W${weekNumber}`;
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [profile, setProfile] = useState(null);
+            const [rehearsals, setRehearsals] = useState([]);
+            
+            const [selectedDay, setSelectedDay] = useState(new Date().getDay() >= 1 && new Date().getDay() <= 5 ? new Date().getDay() : 1);
+            const [selectedHall, setSelectedHall] = useState(HALLS[0].id);
+            const [loading, setLoading] = useState(true);
+            
+            const [authModalOpen, setAuthModalOpen] = useState(false);
+            const [bookingModal, setBookingModal] = useState({ open: false, lesson: null });
+            const [messageModal, setMessageModal] = useState({ open: false, title: '', text: '' });
+
+            const currentWeekKey = useMemo(() => getCurrentWeekKey(), []);
+
+            // 1. Авторизація
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (error) {
+                        console.error("Помилка авторизації:", error);
+                        showMessage("Помилка", "Не вдалося підключитися до сервера. Перевірте налаштування Firebase.");
+                    }
+                };
+
+                initAuth();
+
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    if (currentUser) {
+                        const savedProfile = localStorage.getItem('rehearsal_profile');
+                        if (savedProfile) {
+                            setProfile(JSON.parse(savedProfile));
+                        } else {
+                            setAuthModalOpen(true);
+                        }
+                    } else {
+                        setLoading(false);
+                    }
+                });
+
+                return () => unsubscribe();
+            }, []);
+
+            // 2. Завантаження даних з Firestore
+            useEffect(() => {
+                if (!user) return;
+
+                const rehearsalsRef = collection(db, COLLECTION_NAME);
+                
+                const unsubscribe = onSnapshot(rehearsalsRef, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setRehearsals(data);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Помилка завантаження даних:", error);
+                    // Якщо база не налаштована, не показуємо помилку відразу, просто логуємо
+                    setLoading(false);
+                });
+
+                return () => unsubscribe();
+            }, [user]);
+
+            const saveProfile = () => {
+                const classSelect = document.getElementById('class-select').value;
+                const nameInput = document.getElementById('name-input').value;
+
+                if (!nameInput.trim() || !classSelect) {
+                    showMessage("Увага", "Будь ласка, введіть своє ім'я та оберіть клас.");
+                    return;
+                }
+                const newProfile = { name: nameInput.trim(), className: classSelect };
+                localStorage.setItem('rehearsal_profile', JSON.stringify(newProfile));
+                setProfile(newProfile);
+                setAuthModalOpen(false);
+            };
+
+            const logOut = () => {
+                localStorage.removeItem('rehearsal_profile');
+                setProfile(null);
+                setAuthModalOpen(true);
+            };
+
+            const showMessage = (title, text) => {
+                setMessageModal({ open: true, title, text });
+            };
+
+            const handleSlotClick = (lessonNumber) => {
+                const classBookingsToday = rehearsals.filter(r => 
+                    r.weekKey === currentWeekKey && 
+                    r.day === selectedDay && 
+                    r.className === profile.className
+                );
+
+                if (classBookingsToday.length >= 2) {
+                    showMessage("Ліміт вичерпано", `Клас ${profile.className} вже забронював максимум (2) репетиції на цей день.`);
+                    return;
+                }
+
+                setBookingModal({ open: true, lesson: lessonNumber });
+            };
+
+            const confirmBooking = async () => {
+                const selectedType = document.querySelector('input[name="danceType"]:checked').value;
+                
+                if (!user || !profile || !bookingModal.lesson) return;
+
+                const newBooking = {
+                    weekKey: currentWeekKey,
+                    day: selectedDay,
+                    lesson: bookingModal.lesson,
+                    hall: selectedHall,
+                    danceType: selectedType,
+                    className: profile.className,
+                    responsibleName: profile.name,
+                    uid: user.uid,
+                    createdAt: Date.now()
+                };
+
+                try {
+                    await addDoc(collection(db, COLLECTION_NAME), newBooking);
+                    setBookingModal({ open: false, lesson: null });
+                } catch (error) {
+                    console.error("Помилка бронювання:", error);
+                    showMessage("Помилка бази даних", "Переконайтесь, що ви налаштували базу даних Firebase та Правила (Rules).");
+                }
+            };
+
+            const handleDelete = async (bookingId) => {
+                try {
+                    await deleteDoc(doc(db, COLLECTION_NAME, bookingId));
+                } catch (error) {
+                    console.error("Помилка видалення:", error);
+                    showMessage("Помилка", "Не вдалося видалити репетицію.");
+                }
+            };
+
+            const currentViewRehearsals = rehearsals.filter(r => 
+                r.weekKey === currentWeekKey && 
+                r.day === selectedDay && 
+                r.hall === selectedHall
+            );
+
+            if (loading) {
+                return <div className="min-h-screen flex items-center justify-center text-indigo-600 font-bold text-lg">Завантаження...</div>;
+            }
+
+            return (
+                <div>
+                    <header className="bg-white shadow-sm sticky top-0 z-10">
+                        <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-center">
+                            <div>
+                                <h1 className="text-xl font-bold text-indigo-600 leading-tight">Репетиції</h1>
+                                <p className="text-xs text-gray-500">Тиждень: {currentWeekKey}</p>
+                            </div>
+                            {profile && (
+                                <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 cursor-pointer" onClick={logOut}>
+                                    <IconUser size={16} className="text-indigo-500" />
+                                    <span className="text-sm font-medium text-indigo-700">{profile.className}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex overflow-x-auto hide-scrollbar border-t border-gray-100 bg-white px-2 py-2 max-w-md mx-auto">
+                            {DAYS.map(day => (
+                                <button
+                                    key={day.id}
+                                    onClick={() => setSelectedDay(day.id)}
+                                    className={`flex-1 min-w-[60px] mx-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                                        selectedDay === day.id 
+                                        ? 'bg-indigo-600 text-white shadow-md' 
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {day.short}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="flex p-3 gap-2 bg-gray-50 border-b border-gray-200 max-w-md mx-auto">
+                            {HALLS.map(hall => (
+                                <button
+                                    key={hall.id}
+                                    onClick={() => setSelectedHall(hall.id)}
+                                    className={`flex-1 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                                        selectedHall === hall.id
+                                        ? 'bg-white text-indigo-700 border-2 border-indigo-500 shadow-sm'
+                                        : 'bg-white text-gray-500 border-2 border-transparent shadow-sm'
+                                    }`}
+                                >
+                                    <IconMapPin size={16} />
+                                    {hall.name}
+                                </button>
+                            ))}
+                        </div>
+                    </header>
+
+                    <main className="max-w-md mx-auto px-4 py-4 space-y-3">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(lessonNum => {
+                            const booking = currentViewRehearsals.find(r => r.lesson === lessonNum);
+                            const isMyBooking = booking && user && booking.uid === user.uid;
+
+                            return (
+                                <div key={lessonNum} className={`p-4 rounded-2xl shadow-sm border ${booking ? 'bg-white border-gray-200' : 'bg-indigo-50/50 border-dashed border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors'}`}
+                                     onClick={() => !booking && handleSlotClick(lessonNum)}>
+                                    <div className="flex justify-between items-start">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`min-w-[32px] w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${booking ? 'bg-gray-100 text-gray-500' : 'bg-indigo-100 text-indigo-600'}`}>
+                                                {lessonNum}
+                                            </div>
+                                            <div>
+                                                {booking ? (
+                                                    <>
+                                                        <h3 className="font-bold text-gray-800 text-lg leading-none mb-1">{booking.className}</h3>
+                                                        <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mb-1">
+                                                            {DANCE_TYPES.find(d => d.id === booking.danceType)?.name}
+                                                        </p>
+                                                        <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
+                                                            <IconUser size={12} /> {booking.responsibleName}
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <div className="h-8 flex items-center">
+                                                        <span className="text-indigo-500 font-medium">Вільне місце</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        
+                                        {booking ? (
+                                            isMyBooking && (
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleDelete(booking.id); }}
+                                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                                                >
+                                                    <IconTrash size={20} />
+                                                </button>
+                                            )
+                                        ) : (
+                                            <div className="p-2 text-indigo-400">
+                                                <IconPlus size={20} />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </main>
+
+                    {/* Модалки */}
+                    {authModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+                                <h2 className="text-2xl font-bold text-gray-800 mb-2">Привіт! 👋</h2>
+                                <p className="text-sm text-gray-500 mb-6">Давай познайомимось. Ці дані будуть відображатись при бронюванні.</p>
+                                
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Оберіть ваш клас</label>
+                                        <select id="class-select" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                            <option value="" disabled selected>Оберіть клас...</option>
+                                            {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Ім'я відповідального</label>
+                                        <input id="name-input" type="text" placeholder="Наприклад: Олена Іванівна" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" />
+                                    </div>
+                                    <button onClick={saveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold mt-4">
+                                        Зберегти та почати
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {bookingModal.open && (
+                        <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-xl font-bold text-gray-800">Бронювання</h2>
+                                    <button onClick={() => setBookingModal({open: false, lesson: null})} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
+                                </div>
+                                
+                                <div className="mb-6 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                                    <p className="text-sm text-gray-600 mb-1">Деталі:</p>
+                                    <p className="font-medium text-gray-800">{DAYS.find(d=>d.id===selectedDay)?.name}, {bookingModal.lesson} урок</p>
+                                    <p className="font-medium text-gray-800">{HALLS.find(h=>h.id===selectedHall)?.name} зал</p>
+                                </div>
+
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Тип танцю:</label>
+                                <div className="space-y-2 mb-6">
+                                    {DANCE_TYPES.map(type => (
+                                        <label key={type.id} className="flex items-center p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50">
+                                            <input type="radio" name="danceType" value={type.id} defaultChecked={type.id === DANCE_TYPES[0].id} className="w-5 h-5 text-indigo-600" />
+                                            <span className="ml-3 font-medium text-gray-700">{type.name}</span>
+                                        </label>
+                                    ))}
+                                </div>
+
+                                <button onClick={confirmBooking} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold">
+                                    Підтвердити бронювання
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {messageModal.open && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
+                                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <IconInfo size={24} />
+                                </div>
+                                <h2 className="text-xl font-bold text-gray-800 mb-2">{messageModal.title}</h2>
+                                <p className="text-gray-600 mb-6 text-sm">{messageModal.text}</p>
+                                <button onClick={() => setMessageModal({open: false, title: '', text: ''})} className="w-full py-2.5 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200">
+                                    Зрозуміло
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
