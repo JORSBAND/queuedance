@@ -66,6 +66,7 @@
             { id: 4, name: 'Четвер', short: 'ЧТ' },
             { id: 5, name: 'П\'ятниця', short: 'ПТ' }
         ];
+        const ADMIN_PASSWORD = "44442222";
 
         // --- Іконки SVG ---
         const IconUser = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
@@ -73,6 +74,7 @@
         const IconTrash = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
         const IconPlus = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
         const IconInfo = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+        const IconShield = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
 
         // Функція для визначення поточного тижня (для автоматичного очищення)
         const getCurrentWeekKey = () => {
@@ -87,6 +89,7 @@
         function App() {
             const [user, setUser] = useState(null);
             const [profile, setProfile] = useState(null);
+            const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('rehearsals_admin') === 'true');
             const [rehearsals, setRehearsals] = useState([]);
             
             const [selectedDay, setSelectedDay] = useState(new Date().getDay() >= 1 && new Date().getDay() <= 5 ? new Date().getDay() : 1);
@@ -94,8 +97,10 @@
             const [loading, setLoading] = useState(true);
             
             const [authModalOpen, setAuthModalOpen] = useState(false);
+            const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
             const [bookingModal, setBookingModal] = useState({ open: false, lesson: null });
             const [messageModal, setMessageModal] = useState({ open: false, title: '', text: '' });
+            const [adminCustomEventText, setAdminCustomEventText] = useState('');
 
             const currentWeekKey = useMemo(() => getCurrentWeekKey(), []);
 
@@ -144,7 +149,6 @@
                     setLoading(false);
                 }, (error) => {
                     console.error("Помилка завантаження даних:", error);
-                    // Якщо база не налаштована, не показуємо помилку відразу, просто логуємо
                     setLoading(false);
                 });
 
@@ -168,7 +172,31 @@
             const logOut = () => {
                 localStorage.removeItem('rehearsal_profile');
                 setProfile(null);
+                setIsAdmin(false);
+                localStorage.removeItem('rehearsals_admin');
                 setAuthModalOpen(true);
+            };
+
+            const handleAdminLogin = () => {
+                const pwd = document.getElementById('admin-pwd-input').value;
+                if (pwd === ADMIN_PASSWORD) {
+                    setIsAdmin(true);
+                    localStorage.setItem('rehearsals_admin', 'true');
+                    setAdminLoginModalOpen(false);
+                    showMessage("Успіх", "Ви увійшли як Адміністратор.");
+                } else {
+                    showMessage("Помилка", "Невірний пароль.");
+                }
+            };
+
+            const toggleAdminLogin = () => {
+                if (isAdmin) {
+                    setIsAdmin(false);
+                    localStorage.removeItem('rehearsals_admin');
+                    showMessage("Інфо", "Ви вийшли з режиму Адміністратора.");
+                } else {
+                    setAdminLoginModalOpen(true);
+                }
             };
 
             const showMessage = (title, text) => {
@@ -176,33 +204,52 @@
             };
 
             const handleSlotClick = (lessonNumber) => {
-                const classBookingsToday = rehearsals.filter(r => 
-                    r.weekKey === currentWeekKey && 
-                    r.day === selectedDay && 
-                    r.className === profile.className
-                );
+                // Якщо не адмін, перевіряємо ліміт
+                if (!isAdmin) {
+                    const classBookingsToday = rehearsals.filter(r => 
+                        r.weekKey === currentWeekKey && 
+                        r.day === selectedDay && 
+                        r.className === profile.className &&
+                        r.danceType !== 'custom' // Ігноруємо адмінські події
+                    );
 
-                if (classBookingsToday.length >= 2) {
-                    showMessage("Ліміт вичерпано", `Клас ${profile.className} вже забронював максимум (2) репетиції на цей день.`);
-                    return;
+                    if (classBookingsToday.length >= 2) {
+                        showMessage("Ліміт вичерпано", `Клас ${profile.className} вже забронював максимум (2) репетиції на цей день.`);
+                        return;
+                    }
                 }
 
+                setAdminCustomEventText('');
                 setBookingModal({ open: true, lesson: lessonNumber });
             };
 
             const confirmBooking = async () => {
-                const selectedType = document.querySelector('input[name="danceType"]:checked').value;
-                
                 if (!user || !profile || !bookingModal.lesson) return;
+
+                let finalClassName = profile.className;
+                let finalResponsibleName = profile.name;
+                let finalDanceType = 'general';
+
+                // Якщо адмін ввів спеціальний статус
+                if (isAdmin && adminCustomEventText.trim() !== '') {
+                    finalClassName = adminCustomEventText.trim();
+                    finalResponsibleName = 'Адміністрація';
+                    finalDanceType = 'custom';
+                } else {
+                    const selectedTypeInput = document.querySelector('input[name="danceType"]:checked');
+                    if (selectedTypeInput) {
+                        finalDanceType = selectedTypeInput.value;
+                    }
+                }
 
                 const newBooking = {
                     weekKey: currentWeekKey,
                     day: selectedDay,
                     lesson: bookingModal.lesson,
                     hall: selectedHall,
-                    danceType: selectedType,
-                    className: profile.className,
-                    responsibleName: profile.name,
+                    danceType: finalDanceType,
+                    className: finalClassName,
+                    responsibleName: finalResponsibleName,
                     uid: user.uid,
                     createdAt: Date.now()
                 };
@@ -221,7 +268,7 @@
                     await deleteDoc(doc(db, COLLECTION_NAME, bookingId));
                 } catch (error) {
                     console.error("Помилка видалення:", error);
-                    showMessage("Помилка", "Не вдалося видалити репетицію.");
+                    showMessage("Помилка", "Не вдалося видалити репетицію (Можливо, немає прав у базі даних).");
                 }
             };
 
@@ -243,12 +290,18 @@
                                 <h1 className="text-xl font-bold text-indigo-600 leading-tight">Репетиції</h1>
                                 <p className="text-xs text-gray-500">Тиждень: {currentWeekKey}</p>
                             </div>
-                            {profile && (
-                                <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 cursor-pointer" onClick={logOut}>
-                                    <IconUser size={16} className="text-indigo-500" />
-                                    <span className="text-sm font-medium text-indigo-700">{profile.className}</span>
-                                </div>
-                            )}
+                            <div className="flex items-center gap-2">
+                                {/* Кнопка Адміна */}
+                                <button onClick={toggleAdminLogin} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}>
+                                    <IconShield size={18} />
+                                </button>
+                                {profile && (
+                                    <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 cursor-pointer" onClick={logOut}>
+                                        <IconUser size={16} className="text-indigo-500" />
+                                        <span className="text-sm font-medium text-indigo-700">{profile.className}</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <div className="flex overflow-x-auto hide-scrollbar border-t border-gray-100 bg-white px-2 py-2 max-w-md mx-auto">
@@ -289,22 +342,33 @@
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(lessonNum => {
                             const booking = currentViewRehearsals.find(r => r.lesson === lessonNum);
                             const isMyBooking = booking && user && booking.uid === user.uid;
+                            const canDelete = isMyBooking || isAdmin;
 
                             return (
                                 <div key={lessonNum} className={`p-4 rounded-2xl shadow-sm border ${booking ? 'bg-white border-gray-200' : 'bg-indigo-50/50 border-dashed border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors'}`}
                                      onClick={() => !booking && handleSlotClick(lessonNum)}>
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-center gap-3">
-                                            <div className={`min-w-[32px] w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${booking ? 'bg-gray-100 text-gray-500' : 'bg-indigo-100 text-indigo-600'}`}>
+                                            <div className={`min-w-[32px] w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${booking ? (booking.danceType === 'custom' ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500') : 'bg-indigo-100 text-indigo-600'}`}>
                                                 {lessonNum}
                                             </div>
                                             <div>
                                                 {booking ? (
                                                     <>
-                                                        <h3 className="font-bold text-gray-800 text-lg leading-none mb-1">{booking.className}</h3>
-                                                        <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mb-1">
-                                                            {DANCE_TYPES.find(d => d.id === booking.danceType)?.name}
-                                                        </p>
+                                                        <h3 className={`font-bold text-lg leading-none mb-1 ${booking.danceType === 'custom' ? 'text-rose-700' : 'text-gray-800'}`}>
+                                                            {booking.className}
+                                                        </h3>
+                                                        
+                                                        {booking.danceType !== 'custom' ? (
+                                                            <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mb-1">
+                                                                {DANCE_TYPES.find(d => d.id === booking.danceType)?.name || 'Інше'}
+                                                            </p>
+                                                        ) : (
+                                                            <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md inline-block mb-1">
+                                                                Спеціальна подія
+                                                            </p>
+                                                        )}
+                                                        
                                                         <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
                                                             <IconUser size={12} /> {booking.responsibleName}
                                                         </p>
@@ -318,7 +382,7 @@
                                         </div>
                                         
                                         {booking ? (
-                                            isMyBooking && (
+                                            canDelete && (
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleDelete(booking.id); }}
                                                     className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
@@ -364,9 +428,32 @@
                         </div>
                     )}
 
+                    {/* Модалка входу для Адміна */}
+                    {adminLoginModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                        <IconShield className="text-rose-500" /> Вхід Адміна
+                                    </h2>
+                                    <button onClick={() => setAdminLoginModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <input id="admin-pwd-input" type="password" placeholder="Пароль" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none" />
+                                    </div>
+                                    <button onClick={handleAdminLogin} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold shadow-md">
+                                        Увійти
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Вікно бронювання */}
                     {bookingModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 backdrop-blur-sm">
-                            <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
+                            <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up max-h-[90vh] overflow-y-auto">
                                 <div className="flex justify-between items-center mb-4">
                                     <h2 className="text-xl font-bold text-gray-800">Бронювання</h2>
                                     <button onClick={() => setBookingModal({open: false, lesson: null})} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
@@ -378,23 +465,40 @@
                                     <p className="font-medium text-gray-800">{HALLS.find(h=>h.id===selectedHall)?.name} зал</p>
                                 </div>
 
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Тип танцю:</label>
-                                <div className="space-y-2 mb-6">
-                                    {DANCE_TYPES.map(type => (
-                                        <label key={type.id} className="flex items-center p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50">
-                                            <input type="radio" name="danceType" value={type.id} defaultChecked={type.id === DANCE_TYPES[0].id} className="w-5 h-5 text-indigo-600" />
-                                            <span className="ml-3 font-medium text-gray-700">{type.name}</span>
-                                        </label>
-                                    ))}
+                                {isAdmin && (
+                                    <div className="mb-6 bg-rose-50 p-3 rounded-xl border border-rose-200">
+                                        <label className="block text-sm font-bold text-rose-700 mb-2">Статус від Адміна (опціонально):</label>
+                                        <input 
+                                            type="text" 
+                                            value={adminCustomEventText}
+                                            onChange={(e) => setAdminCustomEventText(e.target.value)}
+                                            placeholder="Напр: Зайнято для заходу" 
+                                            className="w-full p-2.5 border border-rose-300 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white" 
+                                        />
+                                        <p className="text-xs text-rose-600 mt-2 leading-tight">Якщо заповнити це поле, тип танцю ігнорується, а репетиція відображатиметься як Спеціальна подія.</p>
+                                    </div>
+                                )}
+
+                                <div className={`${isAdmin && adminCustomEventText.trim() !== '' ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Тип танцю:</label>
+                                    <div className="space-y-2 mb-6">
+                                        {DANCE_TYPES.map(type => (
+                                            <label key={type.id} className="flex items-center p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50">
+                                                <input type="radio" name="danceType" value={type.id} defaultChecked={type.id === DANCE_TYPES[0].id} className="w-5 h-5 text-indigo-600" />
+                                                <span className="ml-3 font-medium text-gray-700">{type.name}</span>
+                                            </label>
+                                        ))}
+                                    </div>
                                 </div>
 
-                                <button onClick={confirmBooking} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold">
-                                    Підтвердити бронювання
+                                <button onClick={confirmBooking} className={`w-full py-3.5 text-white rounded-xl font-bold ${isAdmin && adminCustomEventText.trim() !== '' ? 'bg-rose-600' : 'bg-indigo-600'}`}>
+                                    Підтвердити {isAdmin && adminCustomEventText.trim() !== '' ? 'статус' : 'бронювання'}
                                 </button>
                             </div>
                         </div>
                     )}
 
+                    {/* Вікно повідомлень */}
                     {messageModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
