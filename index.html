@@ -26,9 +26,13 @@
     <script type="text/babel" data-type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const { useState, useEffect, useMemo } = React;
+
+        // Посилання на ваш сайт (буде прикріплено як кнопка в Telegram). 
+        // Якщо завантажиш на GitHub, заміни це посилання на своє з GitHub Pages!
+        const SITE_URL = "https://vhrchat.firebaseapp.com"; 
 
         const firebaseConfig = {
             apiKey: "AIzaSyCm8nZvhps4yeYDzPNyKLI_PvadAOeYI20",
@@ -143,10 +147,33 @@
             const [tgChatId, setTgChatId] = useState(() => localStorage.getItem('tg_chat_id'));
             const [tgChatTitle, setTgChatTitle] = useState(() => localStorage.getItem('tg_chat_title'));
             const [tgLoading, setTgLoading] = useState(false);
+            const [tgWeekOffset, setTgWeekOffset] = useState(0);
+            const [tgDays, setTgDays] = useState(['all']);
 
             // Дані обраного тижня
             const currentWeekInfo = useMemo(() => getWeekInfo(weekOffset), [weekOffset]);
             
+            // Список доступних тижнів для Telegram розсилки
+            const availableWeeks = useMemo(() => {
+                const weeks = [];
+                for(let i = 0; i <= 10; i++) {
+                    const wInfo = getWeekInfo(i);
+                    if (wInfo.mondayMonth > 2 && wInfo.mondayYear >= new Date().getFullYear()) {
+                        if (i > 0) break;
+                    }
+                    weeks.push({ offset: i, ...wInfo });
+                }
+                return weeks;
+            }, []);
+
+            // Синхронізація модалки з обраним днем/тижнем
+            useEffect(() => {
+                if(tgModalOpen) {
+                    setTgWeekOffset(weekOffset);
+                    setTgDays([selectedDay]);
+                }
+            }, [tgModalOpen, weekOffset, selectedDay]);
+
             // Перевіряємо чи наступний тиждень вже виходить за межі березня (місяць > 2)
             const nextWeekInfo = useMemo(() => getWeekInfo(weekOffset + 1), [weekOffset]);
             const isNextWeekPastMarch = nextWeekInfo.mondayMonth > 2 && nextWeekInfo.mondayYear >= new Date().getFullYear();
@@ -188,10 +215,9 @@
                 const rehearsalsRef = collection(db, COLLECTION_NAME);
                 
                 const unsubscribe = onSnapshot(rehearsalsRef, (snapshot) => {
-                    const data = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
+                    const data = snapshot.docs
+                        .map(doc => ({ id: doc.id, ...doc.data() }))
+                        .filter(doc => doc.id !== 'tg_config'); // Фільтруємо технічний документ Telegram
                     setRehearsals(data);
                     setLoading(false);
                 }, (error) => {
@@ -269,6 +295,45 @@
                 setBookingModal({ open: true, lesson: lessonNumber });
             };
 
+            // Функція для автоматичного оновлення повідомлення в Telegram
+            const triggerTgUpdate = async () => {
+                try {
+                    const tgConfigRef = doc(db, COLLECTION_NAME, 'tg_config');
+                    const tgSnap = await getDoc(tgConfigRef);
+                    
+                    if (tgSnap.exists()) {
+                        const config = tgSnap.data();
+                        if (!config.chatId || !config.messageId) return;
+
+                        // Отримуємо найсвіжіші дані з бази
+                        const snap = await getDocs(collection(db, COLLECTION_NAME));
+                        const allR = snap.docs
+                            .map(d => ({id: d.id, ...d.data()}))
+                            .filter(d => d.id !== 'tg_config');
+
+                        const text = generateTgText(config.weekLabel, config.weekKey, config.days, allR);
+                        
+                        const replyMarkup = {
+                            inline_keyboard: [[{ text: "👉 Відкрити графік на сайті", url: SITE_URL }]]
+                        };
+
+                        await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/editMessageText`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                chat_id: config.chatId,
+                                message_id: config.messageId,
+                                text: text,
+                                parse_mode: 'HTML',
+                                reply_markup: replyMarkup
+                            })
+                        });
+                    }
+                } catch (e) {
+                    console.error("Помилка оновлення Telegram:", e);
+                }
+            };
+
             const confirmBooking = async () => {
                 if (!user || !profile || !bookingModal.lesson) return;
 
@@ -302,6 +367,7 @@
                 try {
                     await addDoc(collection(db, COLLECTION_NAME), newBooking);
                     setBookingModal({ open: false, lesson: null });
+                    await triggerTgUpdate(); // Авто-оновлення Telegram
                 } catch (error) {
                     console.error("Помилка бронювання:", error);
                     showMessage("Помилка бази даних", "Переконайтесь, що ви налаштували базу даних Firebase.");
@@ -311,6 +377,7 @@
             const handleDelete = async (bookingId) => {
                 try {
                     await deleteDoc(doc(db, COLLECTION_NAME, bookingId));
+                    await triggerTgUpdate(); // Авто-оновлення Telegram
                 } catch (error) {
                     console.error("Помилка видалення:", error);
                     showMessage("Помилка", "Не вдалося видалити репетицію.");
@@ -335,10 +402,10 @@
                             setTgChatTitle(title);
                             showMessage("Успіх", `Групу "${title}" знайдено та підключено!`);
                         } else {
-                            showMessage("Помилка", "Не знайдено повідомлень з групи. Напишіть щось у групу і спробуйте знову.");
+                            showMessage("Помилка", "Не знайдено повідомлень з групи. Переконайтесь, що написали саме команду /start у групу.");
                         }
                     } else {
-                         showMessage("Помилка", "Немає нових повідомлень. Напишіть щось у групу і спробуйте ще раз.");
+                         showMessage("Помилка", "Немає нових повідомлень. Напишіть команду /start у групу і спробуйте ще раз.");
                     }
                 } catch (e) {
                      showMessage("Помилка", "Помилка з'єднання з Telegram. Перевірте інтернет.");
@@ -346,43 +413,45 @@
                 setTgLoading(false);
             };
 
-            const generateTgText = (type) => {
+            const generateTgText = (targetWeekLabel, targetWeekKey, targetDays, allRehearsals) => {
                 let text = `🗓 <b>Графік репетицій</b>\n`;
-                text += `Тиждень: ${currentWeekInfo.label}\n`;
+                text += `Тиждень: ${targetWeekLabel}\n`;
 
-                const daysToProcess = type === 'day' ? [DAYS.find(d => d.id === selectedDay)] : DAYS;
+                const daysToProcess = targetDays.includes('all') ? DAYS : DAYS.filter(d => targetDays.includes(d.id));
 
                 daysToProcess.forEach(day => {
-                    if (type === 'week') text += `\n📅 <b>${day.name.toUpperCase()}</b>\n`;
-                    else text += `\n📅 <b>${day.name}</b>\n`;
-
-                    let hasAnyRehearsal = false;
+                    text += `\n📅 <b>${day.name.toUpperCase()}</b>\n`;
 
                     HALLS.forEach(hall => {
-                        const hallRehearsals = rehearsals.filter(r => r.weekKey === currentWeekInfo.key && r.day === day.id && r.hall === hall.id);
-                        if (hallRehearsals.length > 0) {
-                            hasAnyRehearsal = true;
-                            text += `\n📍 <i>${hall.name} зал:</i>\n`;
-                            // Сортуємо по номеру уроку
-                            hallRehearsals.sort((a,b) => a.lesson - b.lesson).forEach(r => {
+                        text += `\n📍 <i>${hall.name} зал:</i>\n`;
+                        
+                        // Проходимось по всіх 9 уроках, щоб показати і вільні, і зайняті
+                        for (let lesson = 1; lesson <= 9; lesson++) {
+                            const r = allRehearsals.find(x => x.weekKey === targetWeekKey && x.day === day.id && x.hall === hall.id && x.lesson === lesson);
+                            
+                            if (r) {
                                 let danceName = r.danceType === 'custom' ? 'Спеціальна подія' : (DANCE_TYPES.find(d=>d.id===r.danceType)?.name || '');
-                                text += `• ${r.lesson} урок (${LESSON_TIMES[r.lesson]}) — <b>${r.className}</b> (${danceName})\n`;
-                            });
+                                text += `• ${lesson} урок (${LESSON_TIMES[lesson]}) — <b>${r.className}</b> (${danceName})\n`;
+                            } else {
+                                text += `• ${lesson} урок (${LESSON_TIMES[lesson]}) — <i>Вільний</i> ✅\n`;
+                            }
                         }
                     });
-                    
-                    if (!hasAnyRehearsal && type === 'day') {
-                        text += `\nВсі зали на цей день вільні!\n`;
-                    }
                 });
 
-                text += `\n👉 <a href="${window.location.href}">Відкрити графік на сайті</a>`;
+                // Посилання тепер у вигляді Inline-кнопки
                 return text;
             };
 
-            const sendTgMessage = async (type) => {
+            const sendTgMessage = async () => {
                 if (!tgChatId) return;
-                const text = generateTgText(type);
+                const targetWeekInfo = getWeekInfo(tgWeekOffset);
+                const text = generateTgText(targetWeekInfo.label, targetWeekInfo.key, tgDays, rehearsals);
+                
+                const replyMarkup = {
+                    inline_keyboard: [[{ text: "👉 Відкрити графік на сайті", url: SITE_URL }]]
+                };
+
                 setTgLoading(true);
                 try {
                     const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
@@ -392,11 +461,21 @@
                             chat_id: tgChatId,
                             text: text,
                             parse_mode: 'HTML',
-                            disable_web_page_preview: true
+                            reply_markup: replyMarkup
                         })
                     });
                     const data = await res.json();
                     if(data.ok) {
+                        // Зберігаємо ID повідомлення в базу, щоб потім його оновлювати
+                        await setDoc(doc(db, COLLECTION_NAME, 'tg_config'), {
+                            chatId: tgChatId,
+                            messageId: data.result.message_id,
+                            weekKey: targetWeekInfo.key,
+                            weekLabel: targetWeekInfo.label,
+                            days: tgDays,
+                            updatedAt: Date.now()
+                        });
+
                         showMessage("Успіх", "Графік успішно відправлено в групу Telegram!");
                         setTgModalOpen(false);
                     } else {
@@ -697,20 +776,49 @@
                                 
                                 <div className="space-y-4">
                                     {!tgChatId ? (
-                                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                            <p className="text-sm text-blue-800 font-bold mb-2">Налаштування бота:</p>
-                                            <ol className="text-sm text-blue-700 list-decimal pl-4 space-y-1 mb-4">
-                                                <li>Додайте вашого бота в Telegram групу.</li>
-                                                <li>Напишіть у групі будь-яке повідомлення.</li>
-                                                <li>Натисніть кнопку нижче.</li>
-                                            </ol>
-                                            <button 
-                                                onClick={findTgGroup} 
-                                                disabled={tgLoading}
-                                                className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex justify-center items-center"
-                                            >
-                                                {tgLoading ? 'Шукаю...' : 'Знайти групу'}
-                                            </button>
+                                        <div className="space-y-4 max-h-[70vh] overflow-y-auto hide-scrollbar pb-2">
+                                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                                <p className="text-sm text-blue-800 font-bold mb-2">Спосіб 1: Автоматичний</p>
+                                                <ol className="text-sm text-blue-700 list-decimal pl-4 space-y-1 mb-4">
+                                                    <li>Додайте бота в Telegram групу.</li>
+                                                    <li>Напишіть у групі команду <b>/start</b> (звичайні повідомлення бот не бачить).</li>
+                                                    <li>Натисніть кнопку:</li>
+                                                </ol>
+                                                <button 
+                                                    onClick={findTgGroup} 
+                                                    disabled={tgLoading}
+                                                    className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex justify-center items-center shadow-md"
+                                                >
+                                                    {tgLoading ? 'Шукаю...' : 'Знайти групу'}
+                                                </button>
+                                            </div>
+                                            
+                                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                                <p className="text-sm text-gray-800 font-bold mb-2">Спосіб 2: Вручну (100% гарантія)</p>
+                                                <p className="text-xs text-gray-600 mb-3 leading-relaxed">
+                                                    Перешліть будь-яке повідомлення з вашої групи боту <b>@getmyid_bot</b>. Він надішле вам "Forwarded from chat... id: -100XXXX". Скопіюйте цей ID з мінусом.
+                                                </p>
+                                                <input 
+                                                    id="manual-chat-id" 
+                                                    type="text" 
+                                                    placeholder="Напр: -100123456789" 
+                                                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white mb-2 text-sm" 
+                                                />
+                                                <button 
+                                                    onClick={() => {
+                                                        const val = document.getElementById('manual-chat-id').value.trim();
+                                                        if (val) {
+                                                            localStorage.setItem('tg_chat_id', val);
+                                                            localStorage.setItem('tg_chat_title', 'Група (додана вручну)');
+                                                            setTgChatId(val);
+                                                            setTgChatTitle('Група (додана вручну)');
+                                                        }
+                                                    }}
+                                                    className="w-full py-2.5 bg-gray-200 text-gray-800 rounded-lg font-bold hover:bg-gray-300 transition-colors"
+                                                >
+                                                    Зберегти ID вручну
+                                                </button>
+                                            </div>
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
@@ -728,22 +836,54 @@
                                                 </button>
                                             </div>
                                             
-                                            <p className="text-sm text-gray-600 mb-2">Що відправити в групу?</p>
+                                            <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                                                <label className="block text-sm font-bold text-gray-700 mb-2">Оберіть тиждень:</label>
+                                                <select 
+                                                    value={tgWeekOffset}
+                                                    onChange={(e) => setTgWeekOffset(Number(e.target.value))}
+                                                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white outline-none mb-4"
+                                                >
+                                                    {availableWeeks.map(w => (
+                                                        <option key={w.offset} value={w.offset}>{w.label}</option>
+                                                    ))}
+                                                </select>
+
+                                                <label className="block text-sm font-bold text-gray-700 mb-2">Оберіть дні:</label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button 
+                                                        onClick={() => setTgDays(['all'])}
+                                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${tgDays.includes('all') ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-100'}`}
+                                                    >
+                                                        Весь тиждень
+                                                    </button>
+                                                    {DAYS.map(d => {
+                                                        const isSelected = !tgDays.includes('all') && tgDays.includes(d.id);
+                                                        return (
+                                                            <button 
+                                                                key={d.id}
+                                                                onClick={() => {
+                                                                    let newDays = tgDays.includes('all') ? [] : [...tgDays];
+                                                                    if (newDays.includes(d.id)) newDays = newDays.filter(id => id !== d.id);
+                                                                    else newDays.push(d.id);
+                                                                    
+                                                                    if (newDays.length === 0 || newDays.length === 5) newDays = ['all'];
+                                                                    setTgDays(newDays);
+                                                                }}
+                                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-100'}`}
+                                                            >
+                                                                {d.short}
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
                                             
                                             <button 
-                                                onClick={() => sendTgMessage('day')} 
+                                                onClick={sendTgMessage} 
                                                 disabled={tgLoading}
                                                 className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50"
                                             >
-                                                {tgLoading ? 'Відправка...' : `Графік на: ${DAYS.find(d=>d.id===selectedDay)?.name}`}
-                                            </button>
-                                            
-                                            <button 
-                                                onClick={() => sendTgMessage('week')} 
-                                                disabled={tgLoading}
-                                                className="w-full py-3 bg-gray-100 text-gray-800 rounded-xl font-bold hover:bg-gray-200 transition-colors disabled:opacity-50"
-                                            >
-                                                {tgLoading ? 'Відправка...' : 'Графік на весь тиждень'}
+                                                {tgLoading ? 'Відправка...' : 'Відправити графік'}
                                             </button>
                                         </div>
                                     )}
