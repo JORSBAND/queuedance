@@ -62,6 +62,17 @@
             { id: 4, name: 'Четвер', short: 'ЧТ' },
             { id: 5, name: 'П\'ятниця', short: 'ПТ' }
         ];
+        const LESSON_TIMES = {
+            1: "08:30 - 09:15",
+            2: "09:25 - 10:10",
+            3: "10:30 - 11:15",
+            4: "11:25 - 12:10",
+            5: "12:30 - 13:15",
+            6: "13:25 - 14:10",
+            7: "14:20 - 15:05",
+            8: "15:10 - 15:55",
+            9: "16:00 - 16:45"
+        };
         const ADMIN_PASSWORD = "44442222";
 
         const IconUser = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
@@ -73,6 +84,9 @@
         const IconChevronLeft = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="15 18 9 12 15 6"/></svg>;
         const IconChevronRight = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="9 18 15 12 9 6"/></svg>;
         const IconClock = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+        const IconTelegram = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
+
+        const TG_BOT_TOKEN = "8790781183:AAHL1o0mrmqFSRt63mXmS1lNvAYZWJMnvlE";
 
         // Функція для визначення інформації про тиждень з урахуванням зсуву
         const getWeekInfo = (offset) => {
@@ -123,6 +137,12 @@
             const [bookingModal, setBookingModal] = useState({ open: false, lesson: null });
             const [messageModal, setMessageModal] = useState({ open: false, title: '', text: '' });
             const [adminCustomEventText, setAdminCustomEventText] = useState('');
+
+            // Telegram Стейт
+            const [tgModalOpen, setTgModalOpen] = useState(false);
+            const [tgChatId, setTgChatId] = useState(() => localStorage.getItem('tg_chat_id'));
+            const [tgChatTitle, setTgChatTitle] = useState(() => localStorage.getItem('tg_chat_title'));
+            const [tgLoading, setTgLoading] = useState(false);
 
             // Дані обраного тижня
             const currentWeekInfo = useMemo(() => getWeekInfo(weekOffset), [weekOffset]);
@@ -297,6 +317,97 @@
                 }
             };
 
+            // --- Telegram Логіка ---
+            const findTgGroup = async () => {
+                setTgLoading(true);
+                try {
+                    const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getUpdates`);
+                    const data = await res.json();
+                    if (data.ok && data.result.length > 0) {
+                        // Шукаємо повідомлення саме з групи (group або supergroup)
+                        const groupUpdate = data.result.reverse().find(u => u.message && (u.message.chat.type === 'group' || u.message.chat.type === 'supergroup'));
+                        if (groupUpdate) {
+                            const id = groupUpdate.message.chat.id;
+                            const title = groupUpdate.message.chat.title;
+                            localStorage.setItem('tg_chat_id', id);
+                            localStorage.setItem('tg_chat_title', title);
+                            setTgChatId(id);
+                            setTgChatTitle(title);
+                            showMessage("Успіх", `Групу "${title}" знайдено та підключено!`);
+                        } else {
+                            showMessage("Помилка", "Не знайдено повідомлень з групи. Напишіть щось у групу і спробуйте знову.");
+                        }
+                    } else {
+                         showMessage("Помилка", "Немає нових повідомлень. Напишіть щось у групу і спробуйте ще раз.");
+                    }
+                } catch (e) {
+                     showMessage("Помилка", "Помилка з'єднання з Telegram. Перевірте інтернет.");
+                }
+                setTgLoading(false);
+            };
+
+            const generateTgText = (type) => {
+                let text = `🗓 <b>Графік репетицій</b>\n`;
+                text += `Тиждень: ${currentWeekInfo.label}\n`;
+
+                const daysToProcess = type === 'day' ? [DAYS.find(d => d.id === selectedDay)] : DAYS;
+
+                daysToProcess.forEach(day => {
+                    if (type === 'week') text += `\n📅 <b>${day.name.toUpperCase()}</b>\n`;
+                    else text += `\n📅 <b>${day.name}</b>\n`;
+
+                    let hasAnyRehearsal = false;
+
+                    HALLS.forEach(hall => {
+                        const hallRehearsals = rehearsals.filter(r => r.weekKey === currentWeekInfo.key && r.day === day.id && r.hall === hall.id);
+                        if (hallRehearsals.length > 0) {
+                            hasAnyRehearsal = true;
+                            text += `\n📍 <i>${hall.name} зал:</i>\n`;
+                            // Сортуємо по номеру уроку
+                            hallRehearsals.sort((a,b) => a.lesson - b.lesson).forEach(r => {
+                                let danceName = r.danceType === 'custom' ? 'Спеціальна подія' : (DANCE_TYPES.find(d=>d.id===r.danceType)?.name || '');
+                                text += `• ${r.lesson} урок (${LESSON_TIMES[r.lesson]}) — <b>${r.className}</b> (${danceName})\n`;
+                            });
+                        }
+                    });
+                    
+                    if (!hasAnyRehearsal && type === 'day') {
+                        text += `\nВсі зали на цей день вільні!\n`;
+                    }
+                });
+
+                text += `\n👉 <a href="${window.location.href}">Відкрити графік на сайті</a>`;
+                return text;
+            };
+
+            const sendTgMessage = async (type) => {
+                if (!tgChatId) return;
+                const text = generateTgText(type);
+                setTgLoading(true);
+                try {
+                    const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            chat_id: tgChatId,
+                            text: text,
+                            parse_mode: 'HTML',
+                            disable_web_page_preview: true
+                        })
+                    });
+                    const data = await res.json();
+                    if(data.ok) {
+                        showMessage("Успіх", "Графік успішно відправлено в групу Telegram!");
+                        setTgModalOpen(false);
+                    } else {
+                        showMessage("Помилка", "Не вдалося відправити. Перевірте, чи бот все ще знаходиться в групі і чи має права.");
+                    }
+                } catch (e) {
+                    showMessage("Помилка", "Помилка відправки.");
+                }
+                setTgLoading(false);
+            };
+
             // Фільтруємо дані за обраним тижнем
             const currentViewRehearsals = rehearsals.filter(r => 
                 r.weekKey === currentWeekInfo.key && 
@@ -337,6 +448,12 @@
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
+                                {/* Кнопка Telegram (тільки для Адміна) */}
+                                {isAdmin && (
+                                    <button onClick={() => setTgModalOpen(true)} className="p-2 rounded-full bg-blue-50 text-blue-500 hover:text-blue-700 hover:bg-blue-100 transition-colors shadow-sm border border-blue-100" title="Відправити в Telegram">
+                                        <IconTelegram size={18} />
+                                    </button>
+                                )}
                                 {/* Кнопка Адміна */}
                                 <button onClick={toggleAdminLogin} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}>
                                     <IconShield size={18} />
@@ -395,8 +512,11 @@
                                      onClick={() => !booking && handleSlotClick(lessonNum)}>
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-center gap-3">
-                                            <div className={`min-w-[32px] w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${booking ? (booking.danceType === 'custom' ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500') : 'bg-indigo-100 text-indigo-600'}`}>
-                                                {lessonNum}
+                                            <div className="flex flex-col items-center w-[75px] flex-shrink-0">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm mb-1 ${booking ? (booking.danceType === 'custom' ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500') : 'bg-indigo-100 text-indigo-600'}`}>
+                                                    {lessonNum}
+                                                </div>
+                                                <span className="text-[10px] text-gray-500 font-semibold whitespace-nowrap">{LESSON_TIMES[lessonNum]}</span>
                                             </div>
                                             <div>
                                                 {booking ? (
@@ -560,6 +680,74 @@
                                 <button onClick={() => setMessageModal({open: false, title: '', text: ''})} className="w-full py-2.5 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200">
                                     Зрозуміло
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Модалка Telegram */}
+                    {tgModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                        <IconTelegram className="text-blue-500" /> Telegram Розсилка
+                                    </h2>
+                                    <button onClick={() => setTgModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                    {!tgChatId ? (
+                                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                            <p className="text-sm text-blue-800 font-bold mb-2">Налаштування бота:</p>
+                                            <ol className="text-sm text-blue-700 list-decimal pl-4 space-y-1 mb-4">
+                                                <li>Додайте вашого бота в Telegram групу.</li>
+                                                <li>Напишіть у групі будь-яке повідомлення.</li>
+                                                <li>Натисніть кнопку нижче.</li>
+                                            </ol>
+                                            <button 
+                                                onClick={findTgGroup} 
+                                                disabled={tgLoading}
+                                                className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex justify-center items-center"
+                                            >
+                                                {tgLoading ? 'Шукаю...' : 'Знайти групу'}
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            <div className="bg-green-50 text-green-700 p-3 rounded-xl border border-green-200 text-sm flex justify-between items-center">
+                                                <span>Група: <b>{tgChatTitle}</b></span>
+                                                <button 
+                                                    onClick={() => {
+                                                        localStorage.removeItem('tg_chat_id');
+                                                        localStorage.removeItem('tg_chat_title');
+                                                        setTgChatId(null);
+                                                    }}
+                                                    className="text-xs text-red-500 underline hover:text-red-700"
+                                                >
+                                                    Змінити
+                                                </button>
+                                            </div>
+                                            
+                                            <p className="text-sm text-gray-600 mb-2">Що відправити в групу?</p>
+                                            
+                                            <button 
+                                                onClick={() => sendTgMessage('day')} 
+                                                disabled={tgLoading}
+                                                className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                                            >
+                                                {tgLoading ? 'Відправка...' : `Графік на: ${DAYS.find(d=>d.id===selectedDay)?.name}`}
+                                            </button>
+                                            
+                                            <button 
+                                                onClick={() => sendTgMessage('week')} 
+                                                disabled={tgLoading}
+                                                className="w-full py-3 bg-gray-100 text-gray-800 rounded-xl font-bold hover:bg-gray-200 transition-colors disabled:opacity-50"
+                                            >
+                                                {tgLoading ? 'Відправка...' : 'Графік на весь тиждень'}
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
