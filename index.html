@@ -24,14 +24,12 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        // Імпорти Firebase безпосередньо через CDN (офіційний спосіб для браузера)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const { useState, useEffect, useMemo } = React;
 
-        // --- Конфігурація Firebase ---
         const firebaseConfig = {
             apiKey: "AIzaSyCm8nZvhps4yeYDzPNyKLI_PvadAOeYI20",
             authDomain: "vhrchat.firebaseapp.com",
@@ -46,10 +44,8 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
 
-        // Шлях до колекції в базі даних (простий шлях для твого хостингу)
         const COLLECTION_NAME = 'rehearsals';
 
-        // --- Константи ---
         const CLASSES = ["5А", "5Б", "5В", "6А", "6Б", "7А", "7Б"];
         const HALLS = [
             { id: 'choreography', name: 'Хореографічний' },
@@ -68,22 +64,45 @@
         ];
         const ADMIN_PASSWORD = "44442222";
 
-        // --- Іконки SVG ---
         const IconUser = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
         const IconMapPin = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
         const IconTrash = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>;
         const IconPlus = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>;
         const IconInfo = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
         const IconShield = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
+        const IconChevronLeft = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="15 18 9 12 15 6"/></svg>;
+        const IconChevronRight = ({ size=24, className="" }) => <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="9 18 15 12 9 6"/></svg>;
 
-        // Функція для визначення поточного тижня (для автоматичного очищення)
-        const getCurrentWeekKey = () => {
+        // Функція для визначення інформації про тиждень з урахуванням зсуву
+        const getWeekInfo = (offset) => {
             const d = new Date();
-            d.setHours(0, 0, 0, 0);
-            d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
-            const week1 = new Date(d.getFullYear(), 0, 4);
-            const weekNumber = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
-            return `${d.getFullYear()}-W${weekNumber}`;
+            // Знаходимо понеділок поточного тижня
+            const day = d.getDay();
+            const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            d.setDate(diff);
+            d.setHours(0,0,0,0);
+            
+            // Додаємо зсув по тижнях
+            d.setDate(d.getDate() + offset * 7);
+            
+            const monday = new Date(d);
+            const friday = new Date(d);
+            friday.setDate(friday.getDate() + 4);
+
+            const target = new Date(monday);
+            target.setDate(target.getDate() + 3 - (target.getDay() + 6) % 7);
+            const week1 = new Date(target.getFullYear(), 0, 4);
+            const weekNumber = 1 + Math.round(((target.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+            const key = `${target.getFullYear()}-W${weekNumber}`;
+
+            const formatD = (date) => `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+
+            return {
+                key,
+                label: `Тижд. ${weekNumber} (${formatD(monday)}-${formatD(friday)})`,
+                mondayMonth: monday.getMonth(),
+                mondayYear: monday.getFullYear()
+            };
         };
 
         function App() {
@@ -92,6 +111,8 @@
             const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('rehearsals_admin') === 'true');
             const [rehearsals, setRehearsals] = useState([]);
             
+            // UI Стейт
+            const [weekOffset, setWeekOffset] = useState(0); // 0 = поточний тиждень, 1 = наступний тощо
             const [selectedDay, setSelectedDay] = useState(new Date().getDay() >= 1 && new Date().getDay() <= 5 ? new Date().getDay() : 1);
             const [selectedHall, setSelectedHall] = useState(HALLS[0].id);
             const [loading, setLoading] = useState(true);
@@ -102,7 +123,12 @@
             const [messageModal, setMessageModal] = useState({ open: false, title: '', text: '' });
             const [adminCustomEventText, setAdminCustomEventText] = useState('');
 
-            const currentWeekKey = useMemo(() => getCurrentWeekKey(), []);
+            // Дані обраного тижня
+            const currentWeekInfo = useMemo(() => getWeekInfo(weekOffset), [weekOffset]);
+            
+            // Перевіряємо чи наступний тиждень вже виходить за межі березня (місяць > 2)
+            const nextWeekInfo = useMemo(() => getWeekInfo(weekOffset + 1), [weekOffset]);
+            const isNextWeekPastMarch = nextWeekInfo.mondayMonth > 2 && nextWeekInfo.mondayYear >= new Date().getFullYear();
 
             // 1. Авторизація
             useEffect(() => {
@@ -204,13 +230,12 @@
             };
 
             const handleSlotClick = (lessonNumber) => {
-                // Якщо не адмін, перевіряємо ліміт
                 if (!isAdmin) {
                     const classBookingsToday = rehearsals.filter(r => 
-                        r.weekKey === currentWeekKey && 
+                        r.weekKey === currentWeekInfo.key && 
                         r.day === selectedDay && 
                         r.className === profile.className &&
-                        r.danceType !== 'custom' // Ігноруємо адмінські події
+                        r.danceType !== 'custom'
                     );
 
                     if (classBookingsToday.length >= 2) {
@@ -230,7 +255,6 @@
                 let finalResponsibleName = profile.name;
                 let finalDanceType = 'general';
 
-                // Якщо адмін ввів спеціальний статус
                 if (isAdmin && adminCustomEventText.trim() !== '') {
                     finalClassName = adminCustomEventText.trim();
                     finalResponsibleName = 'Адміністрація';
@@ -243,7 +267,7 @@
                 }
 
                 const newBooking = {
-                    weekKey: currentWeekKey,
+                    weekKey: currentWeekInfo.key,
                     day: selectedDay,
                     lesson: bookingModal.lesson,
                     hall: selectedHall,
@@ -259,7 +283,7 @@
                     setBookingModal({ open: false, lesson: null });
                 } catch (error) {
                     console.error("Помилка бронювання:", error);
-                    showMessage("Помилка бази даних", "Переконайтесь, що ви налаштували базу даних Firebase та Правила (Rules).");
+                    showMessage("Помилка бази даних", "Переконайтесь, що ви налаштували базу даних Firebase.");
                 }
             };
 
@@ -268,12 +292,13 @@
                     await deleteDoc(doc(db, COLLECTION_NAME, bookingId));
                 } catch (error) {
                     console.error("Помилка видалення:", error);
-                    showMessage("Помилка", "Не вдалося видалити репетицію (Можливо, немає прав у базі даних).");
+                    showMessage("Помилка", "Не вдалося видалити репетицію.");
                 }
             };
 
+            // Фільтруємо дані за обраним тижнем
             const currentViewRehearsals = rehearsals.filter(r => 
-                r.weekKey === currentWeekKey && 
+                r.weekKey === currentWeekInfo.key && 
                 r.day === selectedDay && 
                 r.hall === selectedHall
             );
@@ -285,12 +310,32 @@
             return (
                 <div>
                     <header className="bg-white shadow-sm sticky top-0 z-10">
-                        <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-center">
-                            <div>
+                        <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-start">
+                            <div className="flex flex-col">
                                 <h1 className="text-xl font-bold text-indigo-600 leading-tight">Репетиції</h1>
-                                <p className="text-xs text-gray-500">Тиждень: {currentWeekKey}</p>
+                                
+                                {/* Навігація по тижнях */}
+                                <div className="flex items-center gap-1 mt-2 bg-gray-50 rounded-lg p-0.5 border border-gray-200 w-max shadow-sm">
+                                    <button 
+                                        onClick={() => setWeekOffset(prev => prev - 1)} 
+                                        disabled={weekOffset <= 0}
+                                        className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:hover:bg-transparent disabled:shadow-none transition-all text-gray-600"
+                                    >
+                                        <IconChevronLeft size={16} />
+                                    </button>
+                                    <span className="text-[11px] sm:text-xs font-bold text-gray-700 min-w-[125px] text-center">
+                                        {currentWeekInfo.label}
+                                    </span>
+                                    <button 
+                                        onClick={() => setWeekOffset(prev => prev + 1)} 
+                                        disabled={isNextWeekPastMarch}
+                                        className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:hover:bg-transparent disabled:shadow-none transition-all text-gray-600"
+                                    >
+                                        <IconChevronRight size={16} />
+                                    </button>
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 mt-0.5">
                                 {/* Кнопка Адміна */}
                                 <button onClick={toggleAdminLogin} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}>
                                     <IconShield size={18} />
@@ -298,7 +343,7 @@
                                 {profile && (
                                     <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 cursor-pointer" onClick={logOut}>
                                         <IconUser size={16} className="text-indigo-500" />
-                                        <span className="text-sm font-medium text-indigo-700">{profile.className}</span>
+                                        <span className="text-sm font-medium text-indigo-700 hidden sm:inline">{profile.className}</span>
                                     </div>
                                 )}
                             </div>
@@ -428,7 +473,6 @@
                         </div>
                     )}
 
-                    {/* Модалка входу для Адміна */}
                     {adminLoginModalOpen && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
@@ -450,7 +494,6 @@
                         </div>
                     )}
 
-                    {/* Вікно бронювання */}
                     {bookingModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up max-h-[90vh] overflow-y-auto">
@@ -498,7 +541,6 @@
                         </div>
                     )}
 
-                    {/* Вікно повідомлень */}
                     {messageModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
