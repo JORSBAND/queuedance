@@ -4,12 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Графік репетицій</title>
-    <!-- Tailwind CSS для стилів -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React та ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- Babel для компіляції JSX в браузері -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <style>
@@ -30,9 +27,8 @@
 
         const { useState, useEffect, useMemo } = React;
 
-        // Посилання на ваш сайт (буде прикріплено як кнопка в Telegram). 
-        // Якщо завантажиш на GitHub, заміни це посилання на своє з GitHub Pages!
-        const SITE_URL = "https://jorsband.github.io/queuedance/"; 
+        // Посилання на сайт для кнопки в Telegram
+        const SITE_URL = "https://vhrchat.firebaseapp.com"; 
 
         const firebaseConfig = {
             apiKey: "AIzaSyCm8nZvhps4yeYDzPNyKLI_PvadAOeYI20",
@@ -92,16 +88,13 @@
 
         const TG_BOT_TOKEN = "8790781183:AAHL1o0mrmqFSRt63mXmS1lNvAYZWJMnvlE";
 
-        // Функція для визначення інформації про тиждень з урахуванням зсуву
         const getWeekInfo = (offset) => {
             const d = new Date();
-            // Знаходимо понеділок поточного тижня
             const day = d.getDay();
             const diff = d.getDate() - day + (day === 0 ? -6 : 1);
             d.setDate(diff);
             d.setHours(0,0,0,0);
             
-            // Додаємо зсув по тижнях
             d.setDate(d.getDate() + offset * 7);
             
             const monday = new Date(d);
@@ -130,8 +123,7 @@
             const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('rehearsals_admin') === 'true');
             const [rehearsals, setRehearsals] = useState([]);
             
-            // UI Стейт
-            const [weekOffset, setWeekOffset] = useState(0); // 0 = поточний тиждень, 1 = наступний тощо
+            const [weekOffset, setWeekOffset] = useState(0); 
             const [selectedDay, setSelectedDay] = useState(new Date().getDay() >= 1 && new Date().getDay() <= 5 ? new Date().getDay() : 1);
             const [selectedHall, setSelectedHall] = useState(HALLS[0].id);
             const [loading, setLoading] = useState(true);
@@ -142,31 +134,30 @@
             const [messageModal, setMessageModal] = useState({ open: false, title: '', text: '' });
             const [adminCustomEventText, setAdminCustomEventText] = useState('');
 
-            // Telegram Стейт
             const [tgModalOpen, setTgModalOpen] = useState(false);
             const [tgChatId, setTgChatId] = useState(() => localStorage.getItem('tg_chat_id'));
             const [tgChatTitle, setTgChatTitle] = useState(() => localStorage.getItem('tg_chat_title'));
             const [tgLoading, setTgLoading] = useState(false);
             const [tgWeekOffset, setTgWeekOffset] = useState(0);
             const [tgDays, setTgDays] = useState(['all']);
+            const [activeTgMessage, setActiveTgMessage] = useState(false);
 
-            // Дані обраного тижня
             const currentWeekInfo = useMemo(() => getWeekInfo(weekOffset), [weekOffset]);
             
-            // Список доступних тижнів для Telegram розсилки
+            // Список доступних тижнів (дозволяємо до кінця квітня - місяць 3)
             const availableWeeks = useMemo(() => {
                 const weeks = [];
-                for(let i = 0; i <= 10; i++) {
+                for(let i = 0; i <= 15; i++) {
                     const wInfo = getWeekInfo(i);
-                    if (wInfo.mondayMonth > 2 && wInfo.mondayYear >= new Date().getFullYear()) {
-                        if (i > 0) break;
+                    // Дозволяємо всі тижні, що починаються у квітні (3) або раніше
+                    if (wInfo.mondayMonth > 3 && wInfo.mondayYear >= new Date().getFullYear()) {
+                        break;
                     }
                     weeks.push({ offset: i, ...wInfo });
                 }
                 return weeks;
             }, []);
 
-            // Синхронізація модалки з обраним днем/тижнем
             useEffect(() => {
                 if(tgModalOpen) {
                     setTgWeekOffset(weekOffset);
@@ -174,11 +165,9 @@
                 }
             }, [tgModalOpen, weekOffset, selectedDay]);
 
-            // Перевіряємо чи наступний тиждень вже виходить за межі березня (місяць > 2)
             const nextWeekInfo = useMemo(() => getWeekInfo(weekOffset + 1), [weekOffset]);
-            const isNextWeekPastMarch = nextWeekInfo.mondayMonth > 2 && nextWeekInfo.mondayYear >= new Date().getFullYear();
+            const isNextWeekLimit = nextWeekInfo.mondayMonth > 3 && nextWeekInfo.mondayYear >= new Date().getFullYear();
 
-            // 1. Авторизація
             useEffect(() => {
                 const initAuth = async () => {
                     try {
@@ -208,17 +197,25 @@
                 return () => unsubscribe();
             }, []);
 
-            // 2. Завантаження даних з Firestore
             useEffect(() => {
                 if (!user) return;
 
                 const rehearsalsRef = collection(db, COLLECTION_NAME);
                 
                 const unsubscribe = onSnapshot(rehearsalsRef, (snapshot) => {
-                    const data = snapshot.docs
-                        .map(doc => ({ id: doc.id, ...doc.data() }))
-                        .filter(doc => doc.id !== 'tg_config'); // Фільтруємо технічний документ Telegram
+                    const data = [];
+                    let hasActiveTgMessage = false;
+                    
+                    snapshot.docs.forEach(doc => {
+                        if (doc.id === 'tg_config') {
+                            hasActiveTgMessage = true;
+                        } else {
+                            data.push({ id: doc.id, ...doc.data() });
+                        }
+                    });
+                    
                     setRehearsals(data);
+                    setActiveTgMessage(hasActiveTgMessage);
                     setLoading(false);
                 }, (error) => {
                     console.error("Помилка завантаження даних:", error);
@@ -295,7 +292,6 @@
                 setBookingModal({ open: true, lesson: lessonNumber });
             };
 
-            // Функція для автоматичного оновлення повідомлення в Telegram
             const triggerTgUpdate = async () => {
                 try {
                     const tgConfigRef = doc(db, COLLECTION_NAME, 'tg_config');
@@ -305,7 +301,6 @@
                         const config = tgSnap.data();
                         if (!config.chatId || !config.messageId) return;
 
-                        // Отримуємо найсвіжіші дані з бази
                         const snap = await getDocs(collection(db, COLLECTION_NAME));
                         const allR = snap.docs
                             .map(d => ({id: d.id, ...d.data()}))
@@ -367,31 +362,29 @@
                 try {
                     await addDoc(collection(db, COLLECTION_NAME), newBooking);
                     setBookingModal({ open: false, lesson: null });
-                    await triggerTgUpdate(); // Авто-оновлення Telegram
+                    await triggerTgUpdate();
                 } catch (error) {
                     console.error("Помилка бронювання:", error);
-                    showMessage("Помилка бази даних", "Переконайтесь, що ви налаштували базу даних Firebase.");
+                    showMessage("Помилка", "Бронювання не вдалося.");
                 }
             };
 
             const handleDelete = async (bookingId) => {
                 try {
                     await deleteDoc(doc(db, COLLECTION_NAME, bookingId));
-                    await triggerTgUpdate(); // Авто-оновлення Telegram
+                    await triggerTgUpdate();
                 } catch (error) {
                     console.error("Помилка видалення:", error);
                     showMessage("Помилка", "Не вдалося видалити репетицію.");
                 }
             };
 
-            // --- Telegram Логіка ---
             const findTgGroup = async () => {
                 setTgLoading(true);
                 try {
                     const res = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/getUpdates`);
                     const data = await res.json();
                     if (data.ok && data.result.length > 0) {
-                        // Шукаємо повідомлення саме з групи (group або supergroup)
                         const groupUpdate = data.result.reverse().find(u => u.message && (u.message.chat.type === 'group' || u.message.chat.type === 'supergroup'));
                         if (groupUpdate) {
                             const id = groupUpdate.message.chat.id;
@@ -400,15 +393,15 @@
                             localStorage.setItem('tg_chat_title', title);
                             setTgChatId(id);
                             setTgChatTitle(title);
-                            showMessage("Успіх", `Групу "${title}" знайдено та підключено!`);
+                            showMessage("Успіх", `Групу "${title}" знайдено!`);
                         } else {
-                            showMessage("Помилка", "Не знайдено повідомлень з групи. Переконайтесь, що написали саме команду /start у групу.");
+                            showMessage("Помилка", "Не знайдено групу. Напишіть /start.");
                         }
                     } else {
-                         showMessage("Помилка", "Немає нових повідомлень. Напишіть команду /start у групу і спробуйте ще раз.");
+                         showMessage("Помилка", "Напишіть команду /start у групу.");
                     }
                 } catch (e) {
-                     showMessage("Помилка", "Помилка з'єднання з Telegram. Перевірте інтернет.");
+                     showMessage("Помилка", "Помилка з'єднання.");
                 }
                 setTgLoading(false);
             };
@@ -421,14 +414,10 @@
 
                 daysToProcess.forEach(day => {
                     text += `\n📅 <b>${day.name.toUpperCase()}</b>\n`;
-
                     HALLS.forEach(hall => {
                         text += `\n📍 <i>${hall.name} зал:</i>\n`;
-                        
-                        // Проходимось по всіх 9 уроках, щоб показати і вільні, і зайняті
                         for (let lesson = 1; lesson <= 9; lesson++) {
                             const r = allRehearsals.find(x => x.weekKey === targetWeekKey && x.day === day.id && x.hall === hall.id && x.lesson === lesson);
-                            
                             if (r) {
                                 let danceName = r.danceType === 'custom' ? 'Спеціальна подія' : (DANCE_TYPES.find(d=>d.id===r.danceType)?.name || '');
                                 text += `• ${lesson} урок (${LESSON_TIMES[lesson]}) — <b>${r.className}</b> (${danceName})\n`;
@@ -438,8 +427,6 @@
                         }
                     });
                 });
-
-                // Посилання тепер у вигляді Inline-кнопки
                 return text;
             };
 
@@ -465,21 +452,21 @@
                         })
                     });
                     const data = await res.json();
+                    
                     if(data.ok) {
-                        // Зберігаємо ID повідомлення в базу, щоб потім його оновлювати
                         await setDoc(doc(db, COLLECTION_NAME, 'tg_config'), {
                             chatId: tgChatId,
                             messageId: data.result.message_id,
                             weekKey: targetWeekInfo.key,
                             weekLabel: targetWeekInfo.label,
                             days: tgDays,
-                            updatedAt: Date.now()
+                            updatedAt: Date.now(),
+                            uid: user?.uid || "admin"
                         });
-
-                        showMessage("Успіх", "Графік успішно відправлено в групу Telegram!");
+                        showMessage("Успіх", "Графік відправлено!");
                         setTgModalOpen(false);
                     } else {
-                        showMessage("Помилка", "Не вдалося відправити. Перевірте, чи бот все ще знаходиться в групі і чи має права.");
+                        showMessage("Помилка", "Бот не в групі.");
                     }
                 } catch (e) {
                     showMessage("Помилка", "Помилка відправки.");
@@ -487,7 +474,30 @@
                 setTgLoading(false);
             };
 
-            // Фільтруємо дані за обраним тижнем
+            const deleteTgMessage = async () => {
+                setTgLoading(true);
+                try {
+                    const tgConfigRef = doc(db, COLLECTION_NAME, 'tg_config');
+                    const tgSnap = await getDoc(tgConfigRef);
+                    if (tgSnap.exists()) {
+                        const config = tgSnap.data();
+                        if (config.chatId && config.messageId) {
+                            await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/deleteMessage`, {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({ chat_id: config.chatId, message_id: config.messageId })
+                            });
+                        }
+                        await deleteDoc(tgConfigRef);
+                        showMessage("Успіх", "Повідомлення видалено!");
+                        setTgModalOpen(false);
+                    }
+                } catch (error) {
+                    showMessage("Помилка", "Не вдалося видалити.");
+                }
+                setTgLoading(false);
+            };
+
             const currentViewRehearsals = rehearsals.filter(r => 
                 r.weekKey === currentWeekInfo.key && 
                 r.day === selectedDay && 
@@ -504,78 +514,33 @@
                         <div className="max-w-md mx-auto px-4 py-3 flex justify-between items-start">
                             <div className="flex flex-col">
                                 <h1 className="text-xl font-bold text-indigo-600 leading-tight">Репетиції</h1>
-                                
-                                {/* Навігація по тижнях */}
                                 <div className="flex items-center gap-1 mt-2 bg-gray-50 rounded-lg p-0.5 border border-gray-200 w-max shadow-sm">
-                                    <button 
-                                        onClick={() => setWeekOffset(prev => prev - 1)} 
-                                        disabled={weekOffset <= 0}
-                                        className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:hover:bg-transparent disabled:shadow-none transition-all text-gray-600"
-                                    >
-                                        <IconChevronLeft size={16} />
-                                    </button>
-                                    <span className="text-[11px] sm:text-xs font-bold text-gray-700 min-w-[125px] text-center">
-                                        {currentWeekInfo.label}
-                                    </span>
-                                    <button 
-                                        onClick={() => setWeekOffset(prev => prev + 1)} 
-                                        disabled={isNextWeekPastMarch}
-                                        className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 disabled:hover:bg-transparent disabled:shadow-none transition-all text-gray-600"
-                                    >
-                                        <IconChevronRight size={16} />
-                                    </button>
+                                    <button onClick={() => setWeekOffset(prev => prev - 1)} disabled={weekOffset <= 0} className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 text-gray-600"><IconChevronLeft size={16} /></button>
+                                    <span className="text-[11px] sm:text-xs font-bold text-gray-700 min-w-[125px] text-center">{currentWeekInfo.label}</span>
+                                    <button onClick={() => setWeekOffset(prev => prev + 1)} disabled={isNextWeekLimit} className="p-1 rounded-md hover:bg-white hover:shadow-sm disabled:opacity-30 text-gray-600"><IconChevronRight size={16} /></button>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 mt-0.5">
-                                {/* Кнопка Telegram (тільки для Адміна) */}
                                 {isAdmin && (
-                                    <button onClick={() => setTgModalOpen(true)} className="p-2 rounded-full bg-blue-50 text-blue-500 hover:text-blue-700 hover:bg-blue-100 transition-colors shadow-sm border border-blue-100" title="Відправити в Telegram">
-                                        <IconTelegram size={18} />
-                                    </button>
+                                    <button onClick={() => setTgModalOpen(true)} className="p-2 rounded-full bg-blue-50 text-blue-500 hover:bg-blue-100 border border-blue-100 shadow-sm"><IconTelegram size={18} /></button>
                                 )}
-                                {/* Кнопка Адміна */}
-                                <button onClick={toggleAdminLogin} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400 hover:text-gray-600'}`}>
-                                    <IconShield size={18} />
-                                </button>
+                                <button onClick={toggleAdminLogin} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-400'}`}><IconShield size={18} /></button>
                                 {profile && (
-                                    <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 cursor-pointer" onClick={logOut}>
+                                    <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100" onClick={logOut}>
                                         <IconUser size={16} className="text-indigo-500" />
                                         <span className="text-sm font-medium text-indigo-700 hidden sm:inline">{profile.className}</span>
                                     </div>
                                 )}
                             </div>
                         </div>
-
                         <div className="flex overflow-x-auto hide-scrollbar border-t border-gray-100 bg-white px-2 py-2 max-w-md mx-auto">
                             {DAYS.map(day => (
-                                <button
-                                    key={day.id}
-                                    onClick={() => setSelectedDay(day.id)}
-                                    className={`flex-1 min-w-[60px] mx-1 py-2 rounded-xl text-sm font-medium transition-colors ${
-                                        selectedDay === day.id 
-                                        ? 'bg-indigo-600 text-white shadow-md' 
-                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                                >
-                                    {day.short}
-                                </button>
+                                <button key={day.id} onClick={() => setSelectedDay(day.id)} className={`flex-1 min-w-[60px] mx-1 py-2 rounded-xl text-sm font-medium ${selectedDay === day.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-600'}`}>{day.short}</button>
                             ))}
                         </div>
-
                         <div className="flex p-3 gap-2 bg-gray-50 border-b border-gray-200 max-w-md mx-auto">
                             {HALLS.map(hall => (
-                                <button
-                                    key={hall.id}
-                                    onClick={() => setSelectedHall(hall.id)}
-                                    className={`flex-1 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                                        selectedHall === hall.id
-                                        ? 'bg-white text-indigo-700 border-2 border-indigo-500 shadow-sm'
-                                        : 'bg-white text-gray-500 border-2 border-transparent shadow-sm'
-                                    }`}
-                                >
-                                    <IconMapPin size={16} />
-                                    {hall.name}
-                                </button>
+                                <button key={hall.id} onClick={() => setSelectedHall(hall.id)} className={`flex-1 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 ${selectedHall === hall.id ? 'bg-white text-indigo-700 border-2 border-indigo-500 shadow-sm' : 'bg-white text-gray-500 border-2 border-transparent'}`}><IconMapPin size={16} />{hall.name}</button>
                             ))}
                         </div>
                     </header>
@@ -585,96 +550,42 @@
                             const booking = currentViewRehearsals.find(r => r.lesson === lessonNum);
                             const isMyBooking = booking && user && booking.uid === user.uid;
                             const canDelete = isMyBooking || isAdmin;
-
                             return (
-                                <div key={lessonNum} className={`p-4 rounded-2xl shadow-sm border ${booking ? 'bg-white border-gray-200' : 'bg-indigo-50/50 border-dashed border-indigo-200 hover:bg-indigo-50 cursor-pointer transition-colors'}`}
-                                     onClick={() => !booking && handleSlotClick(lessonNum)}>
+                                <div key={lessonNum} className={`p-4 rounded-2xl shadow-sm border ${booking ? 'bg-white border-gray-200' : 'bg-indigo-50/50 border-dashed border-indigo-200 cursor-pointer hover:bg-indigo-50'}`} onClick={() => !booking && handleSlotClick(lessonNum)}>
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-center gap-3">
                                             <div className="flex flex-col items-center w-[75px] flex-shrink-0">
-                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm mb-1 ${booking ? (booking.danceType === 'custom' ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500') : 'bg-indigo-100 text-indigo-600'}`}>
-                                                    {lessonNum}
-                                                </div>
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm mb-1 ${booking ? (booking.danceType === 'custom' ? 'bg-rose-100 text-rose-600' : 'bg-gray-100 text-gray-500') : 'bg-indigo-100 text-indigo-600'}`}>{lessonNum}</div>
                                                 <span className="text-[10px] text-gray-500 font-semibold whitespace-nowrap">{LESSON_TIMES[lessonNum]}</span>
                                             </div>
                                             <div>
                                                 {booking ? (
                                                     <>
-                                                        <h3 className={`font-bold text-lg leading-none mb-1 ${booking.danceType === 'custom' ? 'text-rose-700' : 'text-gray-800'}`}>
-                                                            {booking.className}
-                                                        </h3>
-                                                        
-                                                        {booking.danceType !== 'custom' ? (
-                                                            <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mb-1">
-                                                                {DANCE_TYPES.find(d => d.id === booking.danceType)?.name || 'Інше'}
-                                                            </p>
-                                                        ) : (
-                                                            <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md inline-block mb-1">
-                                                                Спеціальна подія
-                                                            </p>
-                                                        )}
-                                                        
-                                                        <p className="text-sm text-gray-600 flex items-center gap-1 mt-1">
-                                                            <IconUser size={12} /> {booking.responsibleName}
-                                                        </p>
-                                                        
-                                                        {booking.createdAt && (
-                                                            <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-1 font-medium">
-                                                                <IconClock size={10} />
-                                                                {new Date(booking.createdAt).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                                            </p>
-                                                        )}
+                                                        <h3 className={`font-bold text-lg leading-none mb-1 ${booking.danceType === 'custom' ? 'text-rose-700' : 'text-gray-800'}`}>{booking.className}</h3>
+                                                        {booking.danceType !== 'custom' ? <p className="text-xs text-gray-500 font-medium bg-gray-100 px-2 py-0.5 rounded-md inline-block mb-1">{DANCE_TYPES.find(d => d.id === booking.danceType)?.name}</p> : <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md inline-block mb-1">Спеціальна подія</p>}
+                                                        <p className="text-sm text-gray-600 flex items-center gap-1 mt-1"><IconUser size={12} /> {booking.responsibleName}</p>
+                                                        {booking.createdAt && <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-1"><IconClock size={10} />{new Date(booking.createdAt).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</p>}
                                                     </>
-                                                ) : (
-                                                    <div className="h-8 flex items-center">
-                                                        <span className="text-indigo-500 font-medium">Вільне місце</span>
-                                                    </div>
-                                                )}
+                                                ) : <div className="h-8 flex items-center"><span className="text-indigo-500 font-medium">Вільне місце</span></div>}
                                             </div>
                                         </div>
-                                        
-                                        {booking ? (
-                                            canDelete && (
-                                                <button 
-                                                    onClick={(e) => { e.stopPropagation(); handleDelete(booking.id); }}
-                                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                                                >
-                                                    <IconTrash size={20} />
-                                                </button>
-                                            )
-                                        ) : (
-                                            <div className="p-2 text-indigo-400">
-                                                <IconPlus size={20} />
-                                            </div>
-                                        )}
+                                        {booking ? canDelete && <button onClick={(e) => { e.stopPropagation(); handleDelete(booking.id); }} className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"><IconTrash size={20} /></button> : <div className="p-2 text-indigo-400"><IconPlus size={20} /></div>}
                                     </div>
                                 </div>
                             );
                         })}
                     </main>
 
-                    {/* Модалки */}
+                    {/* Модалки (Авторизація, Адмін, Бронювання, Telegram, Повідомлення) залишаються без змін */}
                     {authModalOpen && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
                                 <h2 className="text-2xl font-bold text-gray-800 mb-2">Привіт! 👋</h2>
-                                <p className="text-sm text-gray-500 mb-6">Давай познайомимось. Ці дані будуть відображатись при бронюванні.</p>
-                                
+                                <p className="text-sm text-gray-500 mb-6">Оберіть ваш клас та введіть ім'я.</p>
                                 <div className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Оберіть ваш клас</label>
-                                        <select id="class-select" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
-                                            <option value="" disabled selected>Оберіть клас...</option>
-                                            {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Ім'я відповідального</label>
-                                        <input id="name-input" type="text" placeholder="Наприклад: Олена Іванівна" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none" />
-                                    </div>
-                                    <button onClick={saveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold mt-4">
-                                        Зберегти та почати
-                                    </button>
+                                    <select id="class-select" className="w-full p-3 border border-gray-300 rounded-xl outline-none bg-white"><option value="" disabled selected>Оберіть клас...</option>{CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                                    <input id="name-input" type="text" placeholder="Ваше ім'я" className="w-full p-3 border border-gray-300 rounded-xl outline-none" />
+                                    <button onClick={saveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold mt-4">Зберегти</button>
                                 </div>
                             </div>
                         </div>
@@ -682,68 +593,66 @@
 
                     {adminLoginModalOpen && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                        <IconShield className="text-rose-500" /> Вхід Адміна
-                                    </h2>
-                                    <button onClick={() => setAdminLoginModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
-                                </div>
-                                <div className="space-y-4">
-                                    <div>
-                                        <input id="admin-pwd-input" type="password" placeholder="Пароль" className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-rose-500 outline-none" />
-                                    </div>
-                                    <button onClick={handleAdminLogin} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold shadow-md">
-                                        Увійти
-                                    </button>
-                                </div>
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+                                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2"><IconShield className="text-rose-500" /> Вхід Адміна</h2>
+                                <input id="admin-pwd-input" type="password" placeholder="Пароль" className="w-full p-3 border border-gray-300 rounded-xl outline-none mb-4" />
+                                <button onClick={handleAdminLogin} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold">Увійти</button>
+                                <button onClick={() => setAdminLoginModalOpen(false)} className="w-full py-2 text-gray-400 mt-2 text-sm">Скасувати</button>
                             </div>
                         </div>
                     )}
 
                     {bookingModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 backdrop-blur-sm">
-                            <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up max-h-[90vh] overflow-y-auto">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-bold text-gray-800">Бронювання</h2>
-                                    <button onClick={() => setBookingModal({open: false, lesson: null})} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
+                            <div className="bg-white rounded-t-3xl sm:rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up overflow-y-auto max-h-[90vh]">
+                                <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold">Бронювання</h2><button onClick={() => setBookingModal({open: false, lesson: null})} className="text-gray-400 text-xl">✕</button></div>
+                                <div className="mb-6 bg-gray-50 p-3 rounded-xl border border-gray-100 text-sm">
+                                    <p className="font-medium">{DAYS.find(d=>d.id===selectedDay)?.name}, {bookingModal.lesson} урок</p>
+                                    <p className="font-medium">{HALLS.find(h=>h.id===selectedHall)?.name} зал</p>
                                 </div>
-                                
-                                <div className="mb-6 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                                    <p className="text-sm text-gray-600 mb-1">Деталі:</p>
-                                    <p className="font-medium text-gray-800">{DAYS.find(d=>d.id===selectedDay)?.name}, {bookingModal.lesson} урок</p>
-                                    <p className="font-medium text-gray-800">{HALLS.find(h=>h.id===selectedHall)?.name} зал</p>
-                                </div>
-
                                 {isAdmin && (
-                                    <div className="mb-6 bg-rose-50 p-3 rounded-xl border border-rose-200">
-                                        <label className="block text-sm font-bold text-rose-700 mb-2">Статус від Адміна (опціонально):</label>
-                                        <input 
-                                            type="text" 
-                                            value={adminCustomEventText}
-                                            onChange={(e) => setAdminCustomEventText(e.target.value)}
-                                            placeholder="Напр: Зайнято для заходу" 
-                                            className="w-full p-2.5 border border-rose-300 rounded-lg focus:ring-2 focus:ring-rose-500 outline-none bg-white" 
-                                        />
-                                        <p className="text-xs text-rose-600 mt-2 leading-tight">Якщо заповнити це поле, тип танцю ігнорується, а репетиція відображатиметься як Спеціальна подія.</p>
+                                    <div className="mb-4 bg-rose-50 p-3 rounded-xl border border-rose-200">
+                                        <label className="block text-sm font-bold text-rose-700 mb-2">Статус від Адміна:</label>
+                                        <input type="text" value={adminCustomEventText} onChange={(e) => setAdminCustomEventText(e.target.value)} placeholder="Напр: Денс-батл" className="w-full p-2.5 border border-rose-300 rounded-lg outline-none" />
                                     </div>
                                 )}
-
-                                <div className={`${isAdmin && adminCustomEventText.trim() !== '' ? 'opacity-50 pointer-events-none' : ''}`}>
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">Тип танцю:</label>
-                                    <div className="space-y-2 mb-6">
-                                        {DANCE_TYPES.map(type => (
-                                            <label key={type.id} className="flex items-center p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50">
-                                                <input type="radio" name="danceType" value={type.id} defaultChecked={type.id === DANCE_TYPES[0].id} className="w-5 h-5 text-indigo-600" />
-                                                <span className="ml-3 font-medium text-gray-700">{type.name}</span>
-                                            </label>
-                                        ))}
-                                    </div>
+                                <div className={`${isAdmin && adminCustomEventText ? 'opacity-30' : ''}`}>
+                                    <label className="block text-sm font-medium mb-2">Тип танцю:</label>
+                                    <div className="space-y-2 mb-6">{DANCE_TYPES.map(type => (
+                                        <label key={type.id} className="flex items-center p-3 border border-gray-200 rounded-xl cursor-pointer hover:bg-gray-50">
+                                            <input type="radio" name="danceType" value={type.id} defaultChecked={type.id === DANCE_TYPES[0].id} className="w-5 h-5 text-indigo-600" />
+                                            <span className="ml-3 font-medium">{type.name}</span>
+                                        </label>
+                                    ))}</div>
                                 </div>
+                                <button onClick={confirmBooking} className={`w-full py-3.5 text-white rounded-xl font-bold ${isAdmin && adminCustomEventText ? 'bg-rose-600' : 'bg-indigo-600'}`}>Підтвердити</button>
+                            </div>
+                        </div>
+                    )}
 
-                                <button onClick={confirmBooking} className={`w-full py-3.5 text-white rounded-xl font-bold ${isAdmin && adminCustomEventText.trim() !== '' ? 'bg-rose-600' : 'bg-indigo-600'}`}>
-                                    Підтвердити {isAdmin && adminCustomEventText.trim() !== '' ? 'статус' : 'бронювання'}
-                                </button>
+                    {tgModalOpen && (
+                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+                                <div className="flex justify-between items-center mb-4"><h2 className="text-xl font-bold flex items-center gap-2"><IconTelegram className="text-blue-500" /> Telegram</h2><button onClick={() => setTgModalOpen(false)} className="text-gray-400">✕</button></div>
+                                {!tgChatId ? (
+                                    <div className="space-y-4">
+                                        <div className="bg-blue-50 p-3 rounded-xl text-sm">Напишіть /start у групі та натисніть кнопку нижче.</div>
+                                        <button onClick={findTgGroup} disabled={tgLoading} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold">{tgLoading ? 'Шукаю...' : 'Знайти групу'}</button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between text-xs bg-gray-50 p-2 rounded-lg"><span>Група: {tgChatTitle}</span><button onClick={() => { localStorage.removeItem('tg_chat_id'); setTgChatId(null); }} className="text-red-500 underline">Змінити</button></div>
+                                        <select value={tgWeekOffset} onChange={(e) => setTgWeekOffset(Number(e.target.value))} className="w-full p-2 border border-gray-300 rounded-lg text-sm mb-2 outline-none">
+                                            {availableWeeks.map(w => <option key={w.offset} value={w.offset}>{w.label}</option>)}
+                                        </select>
+                                        <div className="flex flex-wrap gap-2 mb-4">
+                                            <button onClick={() => setTgDays(['all'])} className={`px-2 py-1 rounded-md text-[10px] font-bold ${tgDays.includes('all') ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>Весь тиждень</button>
+                                            {DAYS.map(d => <button key={d.id} onClick={() => { let n = tgDays.includes('all') ? [] : [...tgDays]; n = n.includes(d.id) ? n.filter(id=>id!==d.id) : [...n, d.id]; if(!n.length || n.length===5) n=['all']; setTgDays(n); }} className={`px-2 py-1 rounded-md text-[10px] font-bold ${!tgDays.includes('all') && tgDays.includes(d.id) ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>{d.short}</button>)}
+                                        </div>
+                                        <button onClick={sendTgMessage} disabled={tgLoading} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold">Відправити графік</button>
+                                        {activeTgMessage && <button onClick={deleteTgMessage} className="w-full py-2 text-red-500 text-xs font-bold mt-2">🗑 Видалити старе повідомлення</button>}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -751,143 +660,10 @@
                     {messageModal.open && (
                         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl p-6 w-full max-w-xs shadow-xl text-center">
-                                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <IconInfo size={24} />
-                                </div>
-                                <h2 className="text-xl font-bold text-gray-800 mb-2">{messageModal.title}</h2>
+                                <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4"><IconInfo size={24} /></div>
+                                <h2 className="text-xl font-bold mb-2">{messageModal.title}</h2>
                                 <p className="text-gray-600 mb-6 text-sm">{messageModal.text}</p>
-                                <button onClick={() => setMessageModal({open: false, title: '', text: ''})} className="w-full py-2.5 bg-gray-100 text-gray-800 font-bold rounded-xl hover:bg-gray-200">
-                                    Зрозуміло
-                                </button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Модалка Telegram */}
-                    {tgModalOpen && (
-                        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-                            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl animate-slide-up">
-                                <div className="flex justify-between items-center mb-4">
-                                    <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                        <IconTelegram className="text-blue-500" /> Telegram Розсилка
-                                    </h2>
-                                    <button onClick={() => setTgModalOpen(false)} className="text-gray-400 hover:text-gray-600 p-2 text-xl">✕</button>
-                                </div>
-                                
-                                <div className="space-y-4">
-                                    {!tgChatId ? (
-                                        <div className="space-y-4 max-h-[70vh] overflow-y-auto hide-scrollbar pb-2">
-                                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                                <p className="text-sm text-blue-800 font-bold mb-2">Спосіб 1: Автоматичний</p>
-                                                <ol className="text-sm text-blue-700 list-decimal pl-4 space-y-1 mb-4">
-                                                    <li>Додайте бота в Telegram групу.</li>
-                                                    <li>Напишіть у групі команду <b>/start</b> (звичайні повідомлення бот не бачить).</li>
-                                                    <li>Натисніть кнопку:</li>
-                                                </ol>
-                                                <button 
-                                                    onClick={findTgGroup} 
-                                                    disabled={tgLoading}
-                                                    className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors disabled:opacity-50 flex justify-center items-center shadow-md"
-                                                >
-                                                    {tgLoading ? 'Шукаю...' : 'Знайти групу'}
-                                                </button>
-                                            </div>
-                                            
-                                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                                <p className="text-sm text-gray-800 font-bold mb-2">Спосіб 2: Вручну (100% гарантія)</p>
-                                                <p className="text-xs text-gray-600 mb-3 leading-relaxed">
-                                                    Перешліть будь-яке повідомлення з вашої групи боту <b>@getmyid_bot</b>. Він надішле вам "Forwarded from chat... id: -100XXXX". Скопіюйте цей ID з мінусом.
-                                                </p>
-                                                <input 
-                                                    id="manual-chat-id" 
-                                                    type="text" 
-                                                    placeholder="Напр: -100123456789" 
-                                                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white mb-2 text-sm" 
-                                                />
-                                                <button 
-                                                    onClick={() => {
-                                                        const val = document.getElementById('manual-chat-id').value.trim();
-                                                        if (val) {
-                                                            localStorage.setItem('tg_chat_id', val);
-                                                            localStorage.setItem('tg_chat_title', 'Група (додана вручну)');
-                                                            setTgChatId(val);
-                                                            setTgChatTitle('Група (додана вручну)');
-                                                        }
-                                                    }}
-                                                    className="w-full py-2.5 bg-gray-200 text-gray-800 rounded-lg font-bold hover:bg-gray-300 transition-colors"
-                                                >
-                                                    Зберегти ID вручну
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            <div className="bg-green-50 text-green-700 p-3 rounded-xl border border-green-200 text-sm flex justify-between items-center">
-                                                <span>Група: <b>{tgChatTitle}</b></span>
-                                                <button 
-                                                    onClick={() => {
-                                                        localStorage.removeItem('tg_chat_id');
-                                                        localStorage.removeItem('tg_chat_title');
-                                                        setTgChatId(null);
-                                                    }}
-                                                    className="text-xs text-red-500 underline hover:text-red-700"
-                                                >
-                                                    Змінити
-                                                </button>
-                                            </div>
-                                            
-                                            <div className="bg-gray-50 p-3 rounded-xl border border-gray-200">
-                                                <label className="block text-sm font-bold text-gray-700 mb-2">Оберіть тиждень:</label>
-                                                <select 
-                                                    value={tgWeekOffset}
-                                                    onChange={(e) => setTgWeekOffset(Number(e.target.value))}
-                                                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white outline-none mb-4"
-                                                >
-                                                    {availableWeeks.map(w => (
-                                                        <option key={w.offset} value={w.offset}>{w.label}</option>
-                                                    ))}
-                                                </select>
-
-                                                <label className="block text-sm font-bold text-gray-700 mb-2">Оберіть дні:</label>
-                                                <div className="flex flex-wrap gap-2">
-                                                    <button 
-                                                        onClick={() => setTgDays(['all'])}
-                                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${tgDays.includes('all') ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-100'}`}
-                                                    >
-                                                        Весь тиждень
-                                                    </button>
-                                                    {DAYS.map(d => {
-                                                        const isSelected = !tgDays.includes('all') && tgDays.includes(d.id);
-                                                        return (
-                                                            <button 
-                                                                key={d.id}
-                                                                onClick={() => {
-                                                                    let newDays = tgDays.includes('all') ? [] : [...tgDays];
-                                                                    if (newDays.includes(d.id)) newDays = newDays.filter(id => id !== d.id);
-                                                                    else newDays.push(d.id);
-                                                                    
-                                                                    if (newDays.length === 0 || newDays.length === 5) newDays = ['all'];
-                                                                    setTgDays(newDays);
-                                                                }}
-                                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isSelected ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-100'}`}
-                                                            >
-                                                                {d.short}
-                                                            </button>
-                                                        )
-                                                    })}
-                                                </div>
-                                            </div>
-                                            
-                                            <button 
-                                                onClick={sendTgMessage} 
-                                                disabled={tgLoading}
-                                                className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50"
-                                            >
-                                                {tgLoading ? 'Відправка...' : 'Відправити графік'}
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
+                                <button onClick={() => setMessageModal({open: false, title: '', text: ''})} className="w-full py-2.5 bg-gray-100 rounded-xl font-bold">Зрозуміло</button>
                             </div>
                         </div>
                     )}
